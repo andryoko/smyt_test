@@ -1,0 +1,171 @@
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>jQuery UI Datepicker - Default functionality</title>
+    <link rel="stylesheet" href="//code.jquery.com/ui/1.11.3/themes/smoothness/jquery-ui.css">
+    <script src="//code.jquery.com/jquery-1.10.2.js"></script>
+    <script src="//code.jquery.com/ui/1.11.3/jquery-ui.js"></script>
+    <link rel="stylesheet" href="/resources/demos/style.css">
+    <script>
+    $(function() {
+      $( ".datepicker" ).datepicker();
+    });
+    </script>
+  </head>
+
+  <div>
+    <ul>
+      {% for model in models %}
+        <li>
+          <a href="/?model={{ model.name }}">
+            {% if model.name == current_model %}
+              <b>{{ model.title }}</b>
+            {% else %}
+              {{ model.title }}
+            {% endif %}
+          </a>
+        </li>
+      {% endfor %}
+    </ul>
+  </div>
+
+  {% if current_model %}
+    <div>
+      <table border="1">
+        <tr>
+          {% for field in fields %}
+            <th>{{ field.verbose_name }}</th>
+          {% endfor %}
+        </tr>
+        {% for object in objects %}
+          <tr>
+            {% for field in object %}
+              <td colid="{{ field.id }}" coltype="{{ field.type }}">{{ field.value }}</td>
+            {% endfor %}
+          </tr>
+        {% endfor %}
+      </table>
+    </div>
+    <br>
+
+    {% if form %}
+    <form action="/" method="post">
+      <input type="hidden" name="model" id="model" value="{{ current_model }}" /><br>
+      {% csrf_token %}
+      {{ form }}
+      <input type="submit" value="Submit" />
+    </form>
+    {% endif %}
+
+  {% endif %}
+
+</html>
+
+<script>
+  function getCookie(name) {
+    var cookieValue = null;
+    if (document.cookie && document.cookie != '') {
+        var cookies = document.cookie.split(';');
+        for (var i = 0; i < cookies.length; i++) {
+            var cookie = jQuery.trim(cookies[i]);
+            // Does this cookie string begin with the name we want?
+            if (cookie.substring(0, name.length + 1) == (name + '=')) {
+                cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                break;
+            }
+        }
+    }
+    return cookieValue;
+  }
+
+  var csrftoken = getCookie('csrftoken');
+
+  function csrfSafeMethod(method) {
+    // these HTTP methods do not require CSRF protection
+    return (/^(GET|HEAD|OPTIONS|TRACE)$/.test(method));
+  }
+  $.ajaxSetup({
+      beforeSend: function(xhr, settings) {
+          if (!csrfSafeMethod(settings.type) && !this.crossDomain) {
+              xhr.setRequestHeader("X-CSRFToken", csrftoken);
+          }
+      }
+  });
+
+  function update_cell(rowid, colid, coltype, value) {
+    $.ajax({
+      type: "POST",
+      url: "/edit_cell/",
+      data: {
+        rowid: rowid,
+        colid: colid,
+        coltype: coltype,
+        value:value,
+        model: $('#model').val()
+      }
+    }).done(function() {
+      console.log('update cell:', rowid, coltype, colid, value);
+    });
+  }
+
+  var updating = false;
+  $('td').click(function() {
+    if (updating)
+      return;
+
+    $('.__edit_input__').remove();
+    var rowid = $(this).parents('tr').find('td:first').text();
+    var colid = $(this).attr('colid');
+    var coltype = $(this).attr('coltype');
+    var value = $(this).text();
+    var cell = $(this);
+    var input_field = null;
+
+    // Ignore 'id' cell
+    if (colid == 'id')
+      return;
+
+    updating = true;
+    console.log('edit cell:', rowid, coltype, colid, value);
+
+    if (coltype == 'char') {
+      input_field = $('<input />').attr('type', 'text')
+          .attr('value', value)
+          .attr('class', '__edit_input__');
+    } else if (coltype == 'int') {
+      input_field = $('<input />').attr('type', 'number')
+          .attr('value', value)
+          .attr('class', '__edit_input__');
+    } else if (coltype == 'date') {
+      input_field = $('<input />').attr('type', 'text')
+          .attr('value', value)
+          .attr('class', '__edit_input__');
+      input_field.datepicker({
+        onSelect: function() {
+          updating = false;
+          update_cell(rowid, colid, coltype, $(this).val())
+          cell.text($(this).val());
+          input_field.remove();
+        },
+        dateFormat: "dd/mm/yy",
+        onClose: function() {
+          updating = false;
+          cell.text($(this).val());
+          input_field.remove();
+        }
+      });
+    }
+
+    $(this).html(input_field);
+    input_field.focus();
+
+    if (coltype != 'date') {
+      input_field.blur(function() {
+        updating = false;
+        update_cell(rowid, colid, coltype, $(this).val())
+        cell.text($(this).val());
+      });
+    }
+
+  })
+</script>
