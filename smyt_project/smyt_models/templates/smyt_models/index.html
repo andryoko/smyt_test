@@ -1,7 +1,7 @@
 <html>
   <head>
+    <title>Home page</title>
     <meta charset="utf-8">
-    <title>jQuery UI Datepicker - Default functionality</title>
     <link rel="stylesheet" href="//code.jquery.com/ui/1.11.3/themes/smoothness/jquery-ui.css">
     <script src="//code.jquery.com/jquery-1.10.2.js"></script>
     <script src="//code.jquery.com/ui/1.11.3/jquery-ui.js"></script>
@@ -11,53 +11,40 @@
       $( ".datepicker" ).datepicker();
     });
     </script>
+
+    <style>
+      .selected {
+        font-weight: bold;
+      }
+    </style>
+
   </head>
 
   <div>
     <ul>
       {% for model in models %}
         <li>
-          <a href="/?model={{ model.name }}">
-            {% if model.name == current_model %}
-              <b>{{ model.title }}</b>
-            {% else %}
-              {{ model.title }}
-            {% endif %}
+          <a href="#" onclick="load_table('{{ model.name }}');return false;" id="{{ model.name }}_link">
+            {{ model.title }}
           </a>
         </li>
       {% endfor %}
     </ul>
   </div>
 
-  {% if current_model %}
+  <div class="right_panel" style="position: absolute; top:20px; left:300px;">
     <div>
-      <table border="1">
-        <tr>
-          {% for field in fields %}
-            <th>{{ field.verbose_name }}</th>
-          {% endfor %}
-        </tr>
-        {% for object in objects %}
-          <tr>
-            {% for field in object %}
-              <td colid="{{ field.id }}" coltype="{{ field.type }}">{{ field.value }}</td>
-            {% endfor %}
-          </tr>
-        {% endfor %}
-      </table>
+      <table border="1" id="model_table"></table>
     </div>
     <br>
 
-    {% if form %}
-    <form action="/" method="post">
+    <form style="display: none;" id="newrec_form">
       <input type="hidden" name="model" id="model" value="{{ current_model }}" /><br>
-      {% csrf_token %}
-      {{ form }}
-      <input type="submit" value="Submit" />
+      <div id="form_fields">
+      </div>
+      <input type="submit" value="Submit" onclick="add_object();return false;"/>
     </form>
-    {% endif %}
-
-  {% endif %}
+  </div>
 
 </html>
 
@@ -92,10 +79,10 @@
       }
   });
 
-  function update_cell(rowid, colid, coltype, value) {
+  function update_cell(rowid, colid, coltype, value, onerror) {
     $.ajax({
       type: "POST",
-      url: "/edit_cell/",
+      url: "/smyt_models/edit_cell/",
       data: {
         rowid: rowid,
         colid: colid,
@@ -103,13 +90,18 @@
         value:value,
         model: $('#model').val()
       }
-    }).done(function() {
-      console.log('update cell:', rowid, coltype, colid, value);
+    }).done(function(result) {
+      if (result != 'success') {
+        alert(result);
+        if (onerror)
+          onerror();
+      } else
+        console.log('updated cell:', rowid, coltype, colid, value);
     });
   }
 
   var updating = false;
-  $('td').click(function() {
+  $('#model_table').on('click', 'td', function() {
     if (updating)
       return;
 
@@ -143,7 +135,10 @@
       input_field.datepicker({
         onSelect: function() {
           updating = false;
-          update_cell(rowid, colid, coltype, $(this).val())
+          update_cell(rowid, colid, coltype, $(this).val(), function() {
+            // on error restore old value
+            cell.text(value);
+          });
           cell.text($(this).val());
           input_field.remove();
         },
@@ -162,10 +157,94 @@
     if (coltype != 'date') {
       input_field.blur(function() {
         updating = false;
-        update_cell(rowid, colid, coltype, $(this).val())
+        update_cell(rowid, colid, coltype, $(this).val(), function() {
+          // on error restore old value
+          cell.text(value);
+        });
         cell.text($(this).val());
       });
     }
+  });
 
-  })
+  function create_table(model_name, result) {
+    // clear table
+    $('#model_table').html('');
+    $('#form_fields').html('');
+    $('#model').val(model_name);
+    $('#newrec_form').show();
+
+    // creta new table
+    var table = $('<table />');
+    // column titles
+    var tr = $('<tr />');
+    $(result.fields).each(function(i, field) {
+      $('<th />').attr('colid', field.name).text(field.title).appendTo(tr);
+      $('#model_table').append(tr);
+
+      if (field.name != 'id') {
+        $('<label />').attr('for', 'id_'+field.name).text(field.title).appendTo('#form_fields');
+        var input = $('<input />').attr('id', 'id_'+field.name).attr('name', field.name);
+        if (field.type == 'char') {
+          input.attr('type', 'text').appendTo('#form_fields');
+        } else if (field.type == 'int') {
+          input.attr('type', 'number').appendTo('#form_fields');
+        } else if (field.type == 'date') {
+          input.attr('type', 'text').appendTo('#form_fields');
+          input.datepicker();
+        }
+      }
+    });
+
+    // fill rows
+    $(result.data).each(function(i, row) {
+      var tr = $('<tr />');
+      $(result.fields).each(function(index2, field) {
+        $('<td />').attr('colid', field.name).attr('coltype', field.type).text(row[index2].value).appendTo(tr);
+      });
+      $('#model_table').append(tr);
+    });
+
+  }
+
+  function load_table(model_name) {
+    $.ajax({
+      type: "POST",
+      url: "/smyt_models/table/",
+      dataType: "json",
+      data: {
+        model: model_name
+      }
+    }).done(function(result) {
+      if (result.error) {
+        alert(result.error);
+      } else {
+        console.log('result:', result);
+        create_table(model_name, result);
+        $('.selected').removeClass('selected');
+        $('#' + model_name + '_link').addClass('selected')
+      }
+    });
+  }
+
+  function add_object() {
+    var data = $('form').serializeArray().reduce(function(obj, item) {
+      obj[item.name] = item.value;
+      return obj;
+    }, {});
+    console.log('data:', data);
+
+    $.ajax({
+      type: "POST",
+      url: "/smyt_models/add/",
+      data: data
+    }).done(function(result) {
+      if (result.error) {
+        alert(result.error);
+      } else {
+        console.log('added cell:', data);
+        create_table(data.model, result);
+      }
+    });
+  }
+
 </script>

@@ -1,4 +1,4 @@
-app_users:
+appusers:
   title: Пользователи
   fields:
     - {id: name, title: Имя, type: char}
