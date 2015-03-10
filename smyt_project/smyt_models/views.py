@@ -11,6 +11,7 @@ from django.http import Http404
 from django.views.decorators.csrf import csrf_protect
 import json
 from django.core.exceptions import ObjectDoesNotExist
+from django.db.models.fields import FieldDoesNotExist
 
 
 def get_table_rows(model):
@@ -62,25 +63,31 @@ def edit_cell(request):
         break
 
     if not model:
-      raise Http404("Model does not exist")
+      return HttpResponse('Model does not exist')
 
     try:
       object = model.objects.get(pk=rowid)
     except ObjectDoesNotExist:
-      raise Http404("Object does not exist")
+      return HttpResponse('Invalid object id')
 
-    field = model._meta.get_field_by_name(colid)[0]
+    try:
+      field = model._meta.get_field_by_name(colid)[0]
+    except FieldDoesNotExist:
+      return HttpResponse('Invalid field name')
+
     if not value:
       return HttpResponse('Value is required')
     elif isinstance(field, models.IntegerField):
       try:
         value = int(value)
       except ValueError:
-        return HttpResponse('Invalid value type. It should be integer')
+        return HttpResponse('Invalid value type. It should be integer.')
     elif isinstance(field, models.DateField):
-      sd, sm, sy = value.split('/')
-      value = datetime.date(int(sy), int(sm), int(sd))
-
+      try:
+        sd, sm, sy = value.split('/')
+        value = datetime.date(int(sy), int(sm), int(sd))
+      except ValueError:
+        return HttpResponse('Invalid value type. Enter a valid date.')
     setattr(object, colid, value)
     object.save(update_fields=[colid])
     return HttpResponse('success')

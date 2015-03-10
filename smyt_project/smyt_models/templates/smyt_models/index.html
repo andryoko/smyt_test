@@ -79,6 +79,43 @@
       }
   });
 
+  function is_valid_date(d) {
+    if ( Object.prototype.toString.call(d) === "[object Date]" ) {
+      // it is a date
+      if ( isNaN( d.getTime() ) ) {  // d.valueOf() could also work
+        return false;
+      }
+      else
+        return true
+    }
+    return false;
+  }
+
+  function validate_value(coltype, value, old_value) {
+    // return error message if value is not valid
+    var message = null;
+    // validate value
+    if (!value) {
+      message = 'This field is required';
+      return message;
+    }
+
+    if (coltype == 'int' && value != '' + parseInt(value))
+      mesage = 'Integer is required.'
+
+
+    if (coltype == 'date') {
+      var parts = value.split('/');
+      if (parts.length == 3) {
+        var date = new Date(parts[2] + '-' + parts[1] + '-' + parts[0]);
+        if (!is_valid_date(date))
+          return 'Enter a valid date.'
+      } else
+        return 'Enter a valid date.'
+    }
+    return ''
+  }
+
   function update_cell(rowid, colid, coltype, value, onerror) {
     $.ajax({
       type: "POST",
@@ -145,7 +182,19 @@
         dateFormat: "dd/mm/yy",
         onClose: function() {
           updating = false;
-          cell.text($(this).val());
+          var new_value = $(this).val();
+          var error = validate_value(coltype, new_value);
+          console.log('new_value:', new_value, error);
+          if (error) {
+            alert(error);
+            cell.text(value);
+          } else {
+            update_cell(rowid, colid, coltype, new_value, function() {
+              // on error restore old value
+              cell.text(value);
+            });
+            cell.text(new_value);
+          }
           input_field.remove();
         }
       });
@@ -157,11 +206,18 @@
     if (coltype != 'date') {
       input_field.blur(function() {
         updating = false;
-        update_cell(rowid, colid, coltype, $(this).val(), function() {
+        var error = validate_value(coltype, $(this).val());
+        if (error) {
+          alert(error);
           // on error restore old value
           cell.text(value);
-        });
-        cell.text($(this).val());
+        } else {
+          update_cell(rowid, colid, coltype, $(this).val(), function() {
+            // on error restore old value
+            cell.text(value);
+          });
+          cell.text($(this).val());
+        }
       });
     }
   });
