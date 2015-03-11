@@ -38,7 +38,7 @@
     </div>
     <br>
 
-    <form style="display: none;" id="newrec_form">
+    <form style="display: none;" id="newrec_form">{% csrf_token %}
       <input type="hidden" name="model" id="model" value="{{ current_model }}" /><br>
       <div id="form_fields">
       </div>
