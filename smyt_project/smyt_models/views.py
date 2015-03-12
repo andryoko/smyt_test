@@ -1,5 +1,4 @@
-from django.shortcuts import render_to_response
-from django.http import HttpResponse, HttpResponseRedirect
+from django.http import HttpResponse
 from django.template import RequestContext, loader
 from smyt_models.models import yaml_models
 import smyt_models.models as app_models
@@ -7,11 +6,10 @@ from django.forms.models import model_to_dict, save_instance
 import forms
 import datetime
 from django.db import models
-from django.http import Http404
-from django.views.decorators.csrf import csrf_protect
 import json
 from django.core.exceptions import ObjectDoesNotExist
 from django.db.models.fields import FieldDoesNotExist
+from django.views.decorators.http import require_POST
 
 
 def get_table_rows(model):
@@ -47,53 +45,48 @@ def index(request):
   context = RequestContext(request, context)
   return HttpResponse(template.render(context))
 
-
-@csrf_protect
+@require_POST
 def edit_cell(request):
-  if request.method == 'POST':
-    model_name = request.POST.get('model')
-    rowid = request.POST.get('rowid')
-    colid = request.POST.get('colid')
-    value = request.POST.get('value')
-    model = None
+  model_name = request.POST.get('model')
+  rowid = request.POST.get('rowid')
+  colid = request.POST.get('colid')
+  value = request.POST.get('value')
+  model = None
 
-    for cls in yaml_models:
-      if cls.__name__ == model_name:
-        model = cls
-        break
+  for cls in yaml_models:
+    if cls.__name__ == model_name:
+      model = cls
+      break
 
-    if not model:
-      return HttpResponse('Model does not exist')
+  if not model:
+    return HttpResponse('Model does not exist')
 
+  try:
+    object = model.objects.get(pk=rowid)
+  except ObjectDoesNotExist:
+    return HttpResponse('Invalid object id')
+
+  try:
+    field = model._meta.get_field_by_name(colid)[0]
+  except FieldDoesNotExist:
+    return HttpResponse('Invalid field name')
+
+  if not value:
+    return HttpResponse('Value is required')
+  elif isinstance(field, models.IntegerField):
     try:
-      object = model.objects.get(pk=rowid)
-    except ObjectDoesNotExist:
-      return HttpResponse('Invalid object id')
-
+      value = int(value)
+    except ValueError:
+      return HttpResponse('Invalid value type. It should be integer.')
+  elif isinstance(field, models.DateField):
     try:
-      field = model._meta.get_field_by_name(colid)[0]
-    except FieldDoesNotExist:
-      return HttpResponse('Invalid field name')
-
-    if not value:
-      return HttpResponse('Value is required')
-    elif isinstance(field, models.IntegerField):
-      try:
-        value = int(value)
-      except ValueError:
-        return HttpResponse('Invalid value type. It should be integer.')
-    elif isinstance(field, models.DateField):
-      try:
-        sd, sm, sy = value.split('/')
-        value = datetime.date(int(sy), int(sm), int(sd))
-      except ValueError:
-        return HttpResponse('Invalid value type. Enter a valid date.')
-    setattr(object, colid, value)
-    object.save(update_fields=[colid])
-    return HttpResponse('success')
-  else:
-    raise Http404("Method does not exist")
-
+      sd, sm, sy = value.split('/')
+      value = datetime.date(int(sy), int(sm), int(sd))
+    except ValueError:
+      return HttpResponse('Invalid value type. Enter a valid date.')
+  setattr(object, colid, value)
+  object.save(update_fields=[colid])
+  return HttpResponse('success')
 
 def objects_to_dict(current_model):
   assert current_model
@@ -118,43 +111,40 @@ def objects_to_dict(current_model):
     'data': get_table_rows(current_model)
   }
 
-
-@csrf_protect
+@require_POST
 def get_table(request):
-  if request.method == 'POST':
-    model_name = request.POST['model']
-    current_model = getattr(app_models, model_name, None)
-    if current_model:
-      # create fields description
+  model_name = request.POST['model']
+  current_model = getattr(app_models, model_name, None)
+  if current_model:
+    # create fields description
+    response_data = objects_to_dict(current_model)
+  else:
+    response_data = {'error':'Invalid model name'}
+
+  return HttpResponse(json.dumps(response_data),
+                      content_type="application/json")
+
+@require_POST
+def add_object(request):
+  response_data = {}
+  model_name = request.POST.get('model', '')
+  current_model = getattr(app_models, model_name, None)
+  if current_model:
+    form_model = forms.generate_form_model(current_model)
+    form = form_model(request.POST)
+    # check whether it's valid:
+    if form.is_valid():
+      # save new instance
+      instance = current_model()
+      save_instance(form, instance)
       response_data = objects_to_dict(current_model)
     else:
-      response_data = {'error':'Invalid model name'}
+      field, error = form.errors.items()[0]
+      response_data = {
+        'error': 'Field %s has invalid value. %s' % (field, error[0])
+      }
+  else:
+    response_data = {'error': 'Invalid model name %s' % model_name}
 
-    return HttpResponse(json.dumps(response_data),
-                        content_type="application/json")
-
-@csrf_protect
-def add_object(request):
-  if request.method == 'POST':
-    response_data = {}
-    model_name = request.POST.get('model', '')
-    current_model = getattr(app_models, model_name, None)
-    if current_model:
-      form_model = forms.generate_form_model(current_model)
-      form = form_model(request.POST)
-      # check whether it's valid:
-      if form.is_valid():
-        # save new instance
-        instance = current_model()
-        save_instance(form, instance)
-        response_data = objects_to_dict(current_model)
-      else:
-        field, error = form.errors.items()[0]
-        response_data = {
-          'error': 'Field %s has invalid value. %s' % (field, error[0])
-        }
-    else:
-      response_data = {'error': 'Invalid model name %s' % model_name}
-
-    return HttpResponse(json.dumps(response_data),
-                        content_type="application/json")
+  return HttpResponse(json.dumps(response_data),
+                      content_type="application/json")
